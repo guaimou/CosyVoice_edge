@@ -46,7 +46,7 @@ This project should keep four layers separate:
 1. Local wrapper layer
    - batch files, helper scripts, local config, outputs
 2. Upstream CosyVoice layer
-   - lives under `third_party/`
+   - lives under `third_party/CosyVoice_edge/`
 3. Vocoder layer
    - validate the usable local path first, then decide whether explicit HiFiGAN separation is needed
 4. Export / deployment layer
@@ -56,5 +56,6 @@ This project should keep four layers separate:
 
 - Prefer project-local paths over machine-global assumptions.
 - Keep all downloaded or copied model assets under `pretrained/` unless there is a strong reason not to.
+- `scripts/run_infer.py` should import CosyVoice from `third_party/CosyVoice_edge/` and use project-local assets under `pretrained/` and `assets/` only.
 - Do not begin SNPE conversion work until Windows inference is confirmed working.
 - If upstream CosyVoice expects Linux-centric commands or paths, wrap them in local scripts instead of editing broad project behavior immediately.

@@ -9,15 +9,24 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 THIRD_PARTY_DIR = PROJECT_ROOT / "third_party"
 PRETRAINED_DIR = PROJECT_ROOT / "pretrained"
 OUTPUT_DIR = PROJECT_ROOT / "output"
-LOCAL_COSYVOICE_ROOT = Path(r"D:\ai_model\太高级\cosyvoice-300m-standalone")
-DEFAULT_MODEL_DIR = LOCAL_COSYVOICE_ROOT / "pretrained_models" / "CosyVoice-300M"
-DEFAULT_PROMPT_WAV = LOCAL_COSYVOICE_ROOT / "asset" / "zero_shot_prompt.wav"
+UPSTREAM_ROOT = THIRD_PARTY_DIR / "CosyVoice_edge"
+DEFAULT_MODEL_DIR = PRETRAINED_DIR / "CosyVoice-300M"
+DEFAULT_PROMPT_WAV = PROJECT_ROOT / "assets" / "zero_shot_prompt.wav"
 DEFAULT_PROMPT_TEXT = "希望你以后能够做的比我还好呦。"
 
-if str(LOCAL_COSYVOICE_ROOT) not in sys.path:
-    sys.path.insert(0, str(LOCAL_COSYVOICE_ROOT))
+if str(UPSTREAM_ROOT) not in sys.path:
+    sys.path.insert(0, str(UPSTREAM_ROOT))
 
 from cosyvoice.cli.cosyvoice import CosyVoice
+
+
+def ensure_local_assets() -> None:
+    if not (UPSTREAM_ROOT / "cosyvoice").is_dir():
+        raise FileNotFoundError(f"upstream CosyVoice code not found: {UPSTREAM_ROOT}")
+    if not DEFAULT_MODEL_DIR.is_dir():
+        raise FileNotFoundError(f"model directory not found: {DEFAULT_MODEL_DIR}")
+    if not DEFAULT_PROMPT_WAV.is_file():
+        raise FileNotFoundError(f"prompt wav not found: {DEFAULT_PROMPT_WAV}")
 
 
 def load_model(model_dir: Path) -> CosyVoice:
@@ -46,6 +55,8 @@ def main():
     parser.add_argument("--speed", type=float, default=1.0)
     args = parser.parse_args()
 
+    ensure_local_assets()
+
     output_path = Path(args.out)
     if not output_path.is_absolute():
         output_path = PROJECT_ROOT / output_path
@@ -61,6 +72,7 @@ def main():
 
     print(f"project_root={PROJECT_ROOT}")
     print(f"third_party_dir={THIRD_PARTY_DIR}")
+    print(f"upstream_root={UPSTREAM_ROOT}")
     print(f"pretrained_dir={PRETRAINED_DIR}")
     print(f"text={args.text}")
     print(f"out={output_path}")

@@ -4,6 +4,9 @@
 # Generated audio and local outputs
 output/
 
+# Project-local model assets
+pretrained/
+
 # Python caches
 __pycache__/
 *.pyc
