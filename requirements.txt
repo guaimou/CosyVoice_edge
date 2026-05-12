@@ -1,0 +1,19 @@
+# Windows-first CosyVoice validation dependencies
+# Aligned with the working local standalone CosyVoice-300M pipeline.
+
+torch>=2.3.0
+torchaudio>=2.3.0
+soundfile
+onnxruntime
+conformer==0.3.2
+diffusers==0.29.0
+einops
+HyperPyYAML==1.2.3
+inflect
+openai-whisper @ git+https://github.com/openai/whisper.git@v20231117
+regex
+scipy
+transformers>=4.40.0
+x-transformers>=2.11.0
+wetext
+omegaconf
