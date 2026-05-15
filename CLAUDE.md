@@ -18,12 +18,17 @@ All project-local work should stay inside `cosyvoice_snpe/`. Do not place new pr
 6. **Docker:** protobuf must be 3.20.x (not 7.x) for SNPE converter. Container `my_work`.
 7. **Key scripts:** `scripts/deploy_to_board/infer_tts_board.py` (board TTS), `scripts/run_infer_snpe.py` (Windows+Docker TTS), `scripts/compare_flow_decoder_snpe_intermediates.py` (SNPE-vs-ORT comparison).
 8. **Board monkey-patches:** wetext (Python 3.8 compat), whisper stub (torchaudio), disabled inflect/lightning/pyworld imports. See memory file for full list.
-9. **Optimization roadmap (board priority):**
+9. **DLC inventory (4 DLCs ready for board):**
+    - campplus.dlc (28MB) — speaker embedding, cosine=0.98 vs ORT. NCF input [1,80,T].
+    - flow.decoder.estimator.fp32.dlc (315MB) — flow estimator. NFC inputs [B,500,80].
+    - hift_f0_predictor.dlc (13MB) — F0 prediction. NCF input [1,80,T].
+    - hift_decode_pre_istft.dlc (67MB) — vocoder decode. NCF inputs. Required explicit padding fix for SNPE.
+    - Total DLC coverage: 423MB. Remaining PyTorch: source_gen + ISTFT (<1MB).
+10. **Optimization roadmap (board priority):**
     - P0: HTP/DSP backend switch (1 line change, 30-50x speedup)
     - P1: Cache DLC session across ODE steps (eliminate ~1.4s Init/step)
-    - P1: HiFiGAN DLC conversion (complete on-device pipeline)
     - P2: INT8 quantization via `snpe-dlc-quantize`
-    - P2: seq2000 DLC on board (already converted, not yet pushed)
+    - P2: campplus→flow_encoder→speech_tokenizer conversion (continuing)
     - P3: Multi-threaded pipeline (frontend/LLM || flow decoder)
 
 ## Project layout
