@@ -1,144 +1,127 @@
 # cosyvoice_snpe
 
-Windows-first local verification project for SC171v3 edge TTS.
+Windows-first local verification project for SC171v3 edge TTS. CosyVoice + HiFiGAN + SNPE.
 
-This repository is used to stand up and validate a self-contained local CosyVoice inference path before any ONNX, SNPE, or device packaging work begins.
+## Current state (2026-05-15)
 
-## Current task
+**SNPE flow decoder estimator validation complete.** The SNPE DLC (`flow.decoder.estimator.fp32.dlc`) successfully replaces the PyTorch flow.decoder.estimator in the full CosyVoice TTS pipeline, generating audible audio end-to-end.
 
-The current goal of this project is:
-
-1. Keep a runnable CosyVoice inference workflow inside this repository.
-2. Keep model assets, helper scripts, and generated outputs isolated locally.
-3. Verify Windows local synthesis first, then move on to export and deployment work later.
-
-## Repository layout
-
-- `scripts/` — local inference helpers
-- `third_party/CosyVoice_edge/` — vendored local CosyVoice source used by this project
-- `pretrained/` — local model assets, kept out of git
-- `assets/` — local prompt/reference assets
-- `output/` — generated wav outputs, kept out of git
-
-## Setup
-
-From the project root:
+### Quick start
 
 ```bat
 setup.bat
 ```
 
-This installs the Python dependencies into the project-local virtual environment when available.
-
-## Run a smoke test
-
 ```bat
-run.bat
-```
-
-This runs:
-
-```bat
-python scripts\run_infer.py --text "你好，这是一次本地验证。" --out output\smoke.wav
-```
-
-A successful run writes `output/smoke.wav`.
-
-## Direct inference
-
-You can also call the wrapper directly:
-
-```bat
+rem PyTorch baseline
 .venv\Scripts\python.exe scripts\run_infer.py --text "你好，这是一次本地验证。" --out output\smoke.wav
+
+rem SNPE-integrated inference
+.venv\Scripts\python.exe scripts\run_infer_snpe.py --text "你好，SNPE验证。" --out output\snpe_test.wav
 ```
 
-Optional arguments:
+### Validation results
 
-- `--prompt-text`
-- `--prompt-wav`
-- `--model-dir`
-- `--speed`
+| Check | Result |
+|---|---|
+| ONNX vs PyTorch reference | max_abs_diff=2.29e-05 (exact) |
+| DLC conversion | Successful (SNPE 2.29.0.241129, seq_len=500) |
+| SNPE intermediates vs ORT (early path) | Exact match (key_mean_abs_diff=0.0) |
+| SNPE estimator_out vs ORT | mean_abs_diff=0.46 (NFC→NCF format) |
+| SNPE TTS audio (short text, seq≈500) | Audible, mean_diff=0.025, corr=0.145 |
+| SNPE TTS audio (long text, seq>500) | Degraded due to fixed seq_len truncation |
 
-## SNPE preparation helpers
+### Key findings
 
-Before starting export or DLC conversion, use these helpers from the project root:
+Three compounding issues were identified and resolved during SNPE validation:
+
+1. **Data preparation bug:** The original layout sweep fed wrong-format data to ORT for transpose variants, making SNPE appear worse than it was. Fixed in `compare_flow_decoder_snpe_intermediates.py`.
+
+2. **Debug dump format:** SNPE DLC internally uses NFC layout for UNet tensors. Loading debug dumps as NCF gave false divergence. The comparator now tests both formats.
+
+3. **SNPE converter protobuf:** `protobuf 7.x` breaks Reshape shape inference in the C++ backend. Fix: `pip install 'protobuf>=3.19,<3.21'` in Docker.
+
+The no-op Reshape bypass was verified correct but unnecessary — the original DLC already handles them via Transpose replacement.
+
+### Repository layout
+
+- `scripts/` — inference, validation, probing, export helpers
+- `third_party/CosyVoice_edge/` — vendored CosyVoice source
+- `pretrained/` — local model assets (kept out of git)
+- `assets/` — prompt/reference audio
+- `output/` — generated wav, DLC, debug artifacts
+
+### Validation helpers
 
 ```bat
+rem === Model inspection ===
 .venv\Scripts\python.exe scripts\inspect_model_artifacts.py
 .venv\Scripts\python.exe scripts\inspect_onnx_models.py
-.venv\Scripts\python.exe scripts\probe_tts_pipeline.py
-.venv\Scripts\python.exe scripts\probe_frontend_onnx_stages.py
+
+rem === Real case extraction ===
+.venv\Scripts\python.exe scripts\dump_flow_decoder_inputs.py --out-dir output\flow_decoder_case
+
+rem === ONNX comparison ===
+.venv\Scripts\python.exe scripts\compare_flow_decoder_onnx.py --case-dir output\flow_decoder_case
+
+rem === SNPE case preparation ===
+.venv\Scripts\python.exe scripts\prepare_flow_decoder_snpe_case.py --case-dir output\flow_decoder_case --variant transpose_inputs
+
+rem === SNPE intermediate comparison ===
+.venv\Scripts\python.exe scripts\compare_flow_decoder_snpe_intermediates.py --prep-dir output\flow_decoder_snpe_prep --debug-dir output\flow_decoder_case_debug\Result_0
+
+rem === SNPE-integrated TTS ===
+.venv\Scripts\python.exe scripts\run_infer_snpe.py --text "你好" --out output\snpe_test.wav
+
+rem === No-op Reshape detection and bypass ===
+.venv\Scripts\python.exe scripts\detect_noop_reshapes.py
+.venv\Scripts\python.exe scripts\bypass_noop_reshapes.py
+
+rem === Layout sweep ===
+.venv\Scripts\python.exe scripts\run_flow_decoder_layout_sweep.py
 ```
 
-What they do:
-
-- `inspect_model_artifacts.py` classifies the current model files under `pretrained/CosyVoice-300M/` so you can see which artifacts are ONNX, PyTorch checkpoints, TorchScript packages, and auxiliary assets.
-- `inspect_onnx_models.py` loads the existing ONNX files with `onnxruntime` and prints provider, input, and output metadata.
-- `probe_tts_pipeline.py` runs the frontend side of the zero-shot path and prints the minimal stage map plus tensor shapes that connect the runtime pipeline.
-- `probe_frontend_onnx_stages.py` probes the `campplus.onnx` and `speech_tokenizer_v1.onnx` stages directly and compares their outputs with the tensors injected into `frontend_zero_shot`.
-
-Current high-value findings from this workspace:
-
-- Existing ONNX artifacts:
-  - `campplus.onnx`
-  - `speech_tokenizer_v1.onnx`
-  - `flow.decoder.estimator.fp32.onnx`
-- Remaining PyTorch checkpoints:
-  - `llm.pt`
-  - `flow.pt`
-  - `hift.pt`
-- Existing TorchScript packages:
-  - `llm.text_encoder.*.zip`
-  - `llm.llm.*.zip`
-  - `flow.encoder.*.zip`
-- Current SNPE status:
-  - `campplus.onnx` is used by the runtime frontend but failed direct SNPE conversion.
-  - `speech_tokenizer_v1.onnx` is used by the runtime frontend but failed direct SNPE conversion because of dynamic-shape and operator issues.
-  - `flow.decoder.estimator.fp32.onnx` successfully converted to DLC under SNPE 2.29.0.241129 and is the first confirmed SNPE-ready target in this workspace.
-
-This means the most practical first SNPE target is `flow.decoder.estimator.fp32.onnx`, not the full end-to-end TTS pipeline.
-
-## First successful SNPE conversion
-
-The current reproducible SNPE success path is the flow decoder estimator ONNX.
-
-Inside the local Docker environment, the successful conversion used:
+### Docker SNPE commands
 
 ```bash
+# Convert ONNX to DLC (protobuf must be 3.20.x!)
 export SNPE_ROOT=/opt/2.29.0.241129
-export PYTHONPATH=/opt/2.29.0.241129/lib/python:${PYTHONPATH}
-export LD_LIBRARY_PATH=/opt/2.29.0.241129/lib/x86_64-linux-clang:${LD_LIBRARY_PATH}
-/opt/2.29.0.241129/bin/x86_64-linux-clang/snpe-onnx-to-dlc \
-  --input_network /project/cosyvoice_snpe_snpe/flow.decoder.estimator.fp32.onnx \
-  --output_path /project/cosyvoice_snpe_snpe/flow.decoder.estimator.fp32.dlc \
+export LD_LIBRARY_PATH=$SNPE_ROOT/lib/x86_64-linux-clang:$LD_LIBRARY_PATH
+export PYTHONPATH=$SNPE_ROOT/lib/python:$PYTHONPATH
+$SNPE_ROOT/bin/x86_64-linux-clang/snpe-onnx-to-dlc \
+  --input_network flow.decoder.estimator.fp32.onnx \
+  --output_path flow.decoder.estimator.fp32.dlc \
   --define_symbol seq_len 500
+
+# Run SNPE inference
+$SNPE_ROOT/bin/x86_64-linux-clang/snpe-net-run \
+  --container flow.decoder.estimator.fp32.dlc \
+  --input_list input_list.txt \
+  --output_dir output \
+  --runtime_order cpu --userbuffer_float --debug
+
+# Inspect DLC
+$SNPE_ROOT/bin/x86_64-linux-clang/snpe-dlc-info -i flow.decoder.estimator.fp32.dlc
 ```
 
-The resulting DLC can be inspected with:
+### Current limitations
 
-```bash
-/opt/2.29.0.241129/bin/x86_64-linux-clang/snpe-dlc-info \
-  -i /project/cosyvoice_snpe_snpe/flow.decoder.estimator.fp32.dlc
-```
+- DLC fixed `seq_len=500` limits text to ~10 seconds. Longer text quality degrades.
+- SNPE inference via Docker adds ~1.5s overhead per call (10 calls = 15s for the estimator alone).
+- HiFiGAN vocoder and frontend ONNX models not yet converted to SNPE.
+- CPU-only inference; DSP/HTP backends not yet tested.
 
-Important properties of this successful conversion:
+### Optimization roadmap
 
-- SNPE converter version: `2.29.0.241129`
-- Staticized symbol: `seq_len=500`
-- DLC graph name: `flow.decoder.estimator.fp32`
-- Effective input shapes after conversion:
-  - `x`: `[2,500,80]`
-  - `mu`: `[2,500,80]`
-  - `cond`: `[2,500,80]`
-  - `mask`: `[2,500,1]`
-  - `t`: `[2]`
-  - `spks`: `[2,80]`
+1. Dynamic seq_len or streaming DLC for long-form audio
+2. Direct SNPE Python API integration (eliminate Docker overhead)
+3. HiFiGAN vocoder DLC conversion
+4. INT8 quantization for size/speed
+5. DSP/HTP backend acceleration
+6. Campplus and speech_tokenizer ONNX SNPE conversion
 
-This is the current narrowest validated SNPE closure and should be treated as the baseline path before attempting broader CosyVoice export work.
+### Notes
 
-## Notes
-
-- The repository is intended to be self-contained for local Windows inference.
-- `pretrained/` is ignored by git because model files are large and machine-local.
-- SNPE conversion is intentionally deferred until the local inference path is stable.
-- A local Docker environment already exposes SNPE 2.29.0.241129, so the next step can validate one of the existing ONNX artifacts inside the container before attempting broader conversion.
+- `pretrained/` and `output/` are git-ignored (large model and artifact files).
+- SNPE conversion is done inside Docker container `my_work`.
+- The local Windows inference path should always remain runnable alongside SNPE experiments.
