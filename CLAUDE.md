@@ -12,12 +12,19 @@ All project-local work should stay inside `cosyvoice_snpe/`. Do not place new pr
 
 1. Keep the local CosyVoice inference path runnable on Windows.
 2. Preserve project-local isolation for model assets, scripts, and generated outputs.
-3. **SNPE flow decoder estimator validation COMPLETE (2026-05-15).** DLC replaces PyTorch estimator in full TTS pipeline → generates audible audio.
-4. **Verified:** `transpose_inputs` variant + original DLC → all intermediates match ORT, estimator_out mean_abs_diff=0.46, E2E audio (short text) mean_abs_diff=0.025, correlation=0.145.
-5. **No-op Reshape bypass:** Correct but unnecessary (original DLC handles them via Transpose replacement). Scripts kept for reference.
-6. **Docker:** protobuf must be 3.20.x (not 7.x) for SNPE converter.
-7. **Current limitation:** Fixed seq_len=500 limits text to ~10s. DLC conversion needs `--define_symbol seq_len 500`.
-8. **Optimization opportunities:** Dynamic seq_len DLC, direct SNPE API (eliminate Docker overhead), HiFiGAN DLC, INT8 quantization, DSP/HTP backend.
+3. **SNPE flow decoder estimator validation COMPLETE (2026-05-15).** All intermediates match ORT (format-aware). E2E audio generated on both Windows+Docker and SC171v3 board.
+4. **Verified:** `transpose_inputs` variant + original DLC → estimator_out mean_abs_diff=0.46, E2E audio (short text) mean_abs_diff=0.025.
+5. **Board deployment (SC171v3):** Full pipeline working at `/home/fibo/AI model/tts_models/cosyvoice_snpe/`. Uses `fiboaisdk` SNPE CPU backend. Model load 19.9s, inference 168s (CPU, first run), audio 0.92s.
+6. **Docker:** protobuf must be 3.20.x (not 7.x) for SNPE converter. Container `my_work`.
+7. **Key scripts:** `scripts/deploy_to_board/infer_tts_board.py` (board TTS), `scripts/run_infer_snpe.py` (Windows+Docker TTS), `scripts/compare_flow_decoder_snpe_intermediates.py` (SNPE-vs-ORT comparison).
+8. **Board monkey-patches:** wetext (Python 3.8 compat), whisper stub (torchaudio), disabled inflect/lightning/pyworld imports. See memory file for full list.
+9. **Optimization roadmap (board priority):**
+    - P0: HTP/DSP backend switch (1 line change, 30-50x speedup)
+    - P1: Cache DLC session across ODE steps (eliminate ~1.4s Init/step)
+    - P1: HiFiGAN DLC conversion (complete on-device pipeline)
+    - P2: INT8 quantization via `snpe-dlc-quantize`
+    - P2: seq2000 DLC on board (already converted, not yet pushed)
+    - P3: Multi-threaded pipeline (frontend/LLM || flow decoder)
 
 ## Project layout
 
@@ -68,6 +75,16 @@ Run commands from `D:/ai_model/cosyvoice_snpe/` unless noted otherwise.
   - `.venv\Scripts\python.exe scripts\bypass_noop_reshapes.py`
   - The modified model is at `output/flow.decoder.estimator.noop_reshapes_bypassed.onnx`
 
+### Board deployment (SC171v3)
+
+- Connect via ADB: `adb shell` (serial `28de40d2`, root access)
+- Project root on board: `/home/fibo/AI model/tts_models/cosyvoice_snpe/`
+- Run TTS on board:
+  - `adb shell "cd '/home/fibo/AI model/tts_models/cosyvoice_snpe' && python3 infer_tts_board.py --text '你好' --out /tmp/test.wav"`
+- Pull audio: `adb pull /tmp/test.wav`
+- Push files to board: `adb push <local> '<board_path>'`
+- Push DLC: `adb push output/flow.decoder.estimator.fp32.dlc '<board_path>/dlc/'`
+
 ## Architecture overview
 
 This project should keep four layers separate:
@@ -96,3 +113,7 @@ This project should keep four layers separate:
 - `detect_noop_reshapes.py` scanned 399 Reshape nodes in the graph and found 11 no-ops. 10 are data-path (safe to bypass); 1 is shape-computation (`/Reshape_2` on int64 tensors — do NOT bypass). `bypass_noop_reshapes.py` removes all 10 data-path no-op Reshapes and reconnects consumers. ORT confirms bit-identical output.
 - Docker SNPE converter requires `protobuf>=3.19,<3.21`. If conversion fails with garbage values in Reshape shape inference, check: `pip install 'protobuf>=3.19,<3.21'`. The issue is that `protobuf 7.x` breaks ONNX constant initializer reading in the C++ backend.
 - The `transpose_inputs` data variant is required for correct SNPE inference. Always use `--variant transpose_inputs` with `prepare_flow_decoder_snpe_case.py`. The comparator automatically detects the variant from prep_metadata.json and adjusts ORT loading accordingly.
+- **Board deployment (SC171v3):** ADB serial `28de40d2`. Project at `/home/fibo/AI model/tts_models/cosyvoice_snpe/`. Python 3.8.10, fiboaisdk (SNPE/QNN). No internet access — all deps installed offline via wheels.
+- **Board monkey-patches:** wetext constants.py (Python 3.8 `importlib.resources` compat), whisper stub (`log_mel_spectrogram` via torchaudio), disabled inflect/lightning/pyworld imports, ahocorasick stub. If packages are reinstalled, these need re-application.
+- **Board SDK API:** `Execute_float` expects `dict[str, list[float]]` (flattened lists, not numpy arrays). `FetchOutputs_float` returns `dict[str, list[float]]`. DLC input names: x, mask, mu, t, spks, cond. Output: estimator_out.
+- `seq2000` DLC available at `output/flow.decoder.estimator.seq2000.dlc` (not yet pushed to board).

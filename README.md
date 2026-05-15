@@ -4,7 +4,7 @@ Windows-first local verification project for SC171v3 edge TTS. CosyVoice + HiFiG
 
 ## Current state (2026-05-15)
 
-**SNPE flow decoder estimator validation complete.** The SNPE DLC (`flow.decoder.estimator.fp32.dlc`) successfully replaces the PyTorch flow.decoder.estimator in the full CosyVoice TTS pipeline, generating audible audio end-to-end.
+**SNPE flow decoder estimator validation complete. Deployed to SC171v3 board.** The SNPE DLC replaces the PyTorch estimator in the full CosyVoice TTS pipeline on both Windows+Docker and natively on SC171v3 (via fiboaisdk). End-to-end audio generation verified on both platforms.
 
 ### Quick start
 
@@ -104,20 +104,35 @@ $SNPE_ROOT/bin/x86_64-linux-clang/snpe-net-run \
 $SNPE_ROOT/bin/x86_64-linux-clang/snpe-dlc-info -i flow.decoder.estimator.fp32.dlc
 ```
 
+### SC171v3 board deployment
+
+Project location: `/home/fibo/AI model/tts_models/cosyvoice_snpe/` (ADB serial `28de40d2`, root access)
+
+```bash
+# Run TTS on board
+adb shell "cd '/home/fibo/AI model/tts_models/cosyvoice_snpe' && python3 infer_tts_board.py --text '你好' --out /tmp/test.wav"
+
+# Pull audio back
+adb pull /tmp/test.wav
+```
+
+Board results: model load 19.9s, SNPE inference 168s (CPU, 10 ODE steps), audio 0.92s, RTF 181x.
+
 ### Current limitations
 
-- DLC fixed `seq_len=500` limits text to ~10 seconds. Longer text quality degrades.
-- SNPE inference via Docker adds ~1.5s overhead per call (10 calls = 15s for the estimator alone).
+- DLC fixed `seq_len=500` limits text to ~10 seconds.
+- Board CPU backend is slow (RTF 181x); DSP/HTP backends not yet tested on board.
+- Python 3.8.10 on board required monkey-patches (wetext, whisper stub, disabled lightning/pyworld/inflect).
 - HiFiGAN vocoder and frontend ONNX models not yet converted to SNPE.
-- CPU-only inference; DSP/HTP backends not yet tested.
+- No internet on board — all deps installed offline via wheels.
 
 ### Optimization roadmap
 
-1. Dynamic seq_len or streaming DLC for long-form audio
-2. Direct SNPE Python API integration (eliminate Docker overhead)
-3. HiFiGAN vocoder DLC conversion
+1. HTP/DSP backend switch on board (1 line change, 30-50x expected speedup)
+2. Cache DLC session across ODE steps (eliminate Init overhead)
+3. HiFiGAN vocoder DLC conversion (complete on-device pipeline)
 4. INT8 quantization for size/speed
-5. DSP/HTP backend acceleration
+5. seq2000 DLC on board for longer text support
 6. Campplus and speech_tokenizer ONNX SNPE conversion
 
 ### Notes
