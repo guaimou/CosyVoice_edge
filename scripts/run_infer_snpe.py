@@ -163,7 +163,7 @@ class SnpeEstimatorWrapper:
         """Mimics torch.nn.Module __call__ for the estimator."""
         self.call_count += 1
         orig_seq_len = x.size(2)
-        target_seq_len = 500  # DLC was converted with seq_len=500
+        target_seq_len = getattr(SnpeEstimatorWrapper, 'TARGET_SEQ_LEN', 500)
 
         print(f"  [SNPE estimator call #{self.call_count}] x={list(x.shape)} t={t.tolist()}")
 
@@ -225,6 +225,7 @@ def main():
     parser.add_argument("--prompt-wav", default=str(DEFAULT_PROMPT_WAV))
     parser.add_argument("--model-dir", default=str(DEFAULT_MODEL_DIR))
     parser.add_argument("--dlc", default=str(DEFAULT_DLC))
+    parser.add_argument("--dlc-seq-len", type=int, default=500, help="Target seq_len of the DLC (default 500)")
     parser.add_argument("--speed", type=float, default=1.0)
     parser.add_argument("--container", default=DEFAULT_CONTAINER)
     parser.add_argument("--snpe-project", default=DEFAULT_SNPE_PROJECT)
@@ -261,6 +262,8 @@ def main():
 
     # Patch estimator with SNPE DLC
     print("patching estimator with SNPE DLC wrapper...")
+    # Set the target seq_len for the DLC
+    SnpeEstimatorWrapper.TARGET_SEQ_LEN = args.dlc_seq_len
     wrapper = patch_estimator(model, dlc_path, args.container, args.snpe_project, args.snpe_root)
     print("estimator patched")
 
