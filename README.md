@@ -106,34 +106,46 @@ $SNPE_ROOT/bin/x86_64-linux-clang/snpe-dlc-info -i flow.decoder.estimator.fp32.d
 
 ### SC171v3 board deployment
 
-Project location: `/home/fibo/AI model/tts_models/cosyvoice_snpe/` (ADB serial `28de40d2`, root access)
+Project: `/home/fibo/AI model/tts_models/cosyvoice_snpe/` (ADB `28de40d2`, root)
 
 ```bash
-# Run TTS on board
-adb shell "cd '/home/fibo/AI model/tts_models/cosyvoice_snpe' && python3 infer_tts_board.py --text '你好' --out /tmp/test.wav"
-
-# Pull audio back
+# Optimized TTS (INT8 DSP flow estimator + CPU rest)
+adb shell "cd '/home/fibo/AI model/tts_models/cosyvoice_snpe' && python3 infer_tts_board_v3.py --text '你好' --out /tmp/test.wav"
 adb pull /tmp/test.wav
 ```
 
-Board results: model load 19.9s, SNPE inference 168s (CPU, 10 ODE steps), audio 0.92s, RTF 181x.
+Board results (v3, INT8 DSP): LLM 20s + DSP Init 95s + 10 ODE steps 180s = **298s total, 3.6s audio**.
+Pure CPU (v1): 383s for 2.3s audio. DSP Exec per step: 0.426s (85x vs CPU), but Python marshalling adds ~17s/step.
+
+### DLC inventory
+
+| DLC | INT8 | Purpose |
+|---|---|---|
+| flow.decoder.estimator_int8.dlc | 84MB | Flow estimator (DSP, 0.426s/step) |
+| hift_f0_predictor_int8.dlc | 3.3MB | F0 predictor (DSP, 0.040s) |
+| hift_decode_pre_istft_int8.dlc | 17.7MB | Vocoder decode |
+| campplus_int8.dlc | 8.7MB | Speaker embedding |
+
+### Critical deployment notes
+- **LLM must load FIRST, then DSP Init.** Reverse order causes OOM (5.5GB limit).
+- fiboaisdk only supports one unique DSP DLC per process. Multi-process also OOMs.
+- QCS6490 HTP supports INT8 only (not FP16). FP32 must use CPU.
+- DSP Init ~95s is one-time; service mode would reuse the session.
+- Python numpy↔list conversion costs ~17s/step — eliminating this would bring total to ~40s.
 
 ### Current limitations
-
-- DLC fixed `seq_len=500` limits text to ~10 seconds.
-- Board CPU backend is slow (RTF 181x); DSP/HTP backends not yet tested on board.
-- Python 3.8.10 on board required monkey-patches (wetext, whisper stub, disabled lightning/pyworld/inflect).
-- HiFiGAN vocoder and frontend ONNX models not yet converted to SNPE.
-- No internet on board — all deps installed offline via wheels.
+- DLC `seq_len=500` limits text to ~10s. seq2000 DLC available but not tested on board.
+- DSP Init overhead (95s) not cached across requests (single-run mode).
+- Python data marshalling dominates inference time.
+- Python 3.8.10 requires monkey-patches (wetext, whisper stub, disabled imports).
 
 ### Optimization roadmap
-
-1. HTP/DSP backend switch on board (1 line change, 30-50x expected speedup)
-2. Cache DLC session across ODE steps (eliminate Init overhead)
-3. HiFiGAN vocoder DLC conversion (complete on-device pipeline)
-4. INT8 quantization for size/speed
-5. seq2000 DLC on board for longer text support
-6. Campplus and speech_tokenizer ONNX SNPE conversion
+1. Eliminate numpy↔list marshalling → total ~40s (10x vs current 298s)
+2. DSP session caching / service mode → save 95s Init
+3. FP16 TorchScript LLM (772MB, pushed, awaiting integration)
+4. INT8 quantization ✅ done (all 4 DLCs)
+5. HTP/DSP backend ✅ verified (single-DSP mode)
+6. campplus DLC integration into board pipeline
 
 ### Notes
 

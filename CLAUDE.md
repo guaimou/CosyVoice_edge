@@ -18,23 +18,27 @@ All project-local work should stay inside `cosyvoice_snpe/`. Do not place new pr
 6. **Docker:** protobuf must be 3.20.x (not 7.x) for SNPE converter. Container `my_work`.
 7. **Key scripts:** `scripts/deploy_to_board/infer_tts_board.py` (board TTS), `scripts/run_infer_snpe.py` (Windows+Docker TTS), `scripts/compare_flow_decoder_snpe_intermediates.py` (SNPE-vs-ORT comparison).
 8. **Board monkey-patches:** wetext (Python 3.8 compat), whisper stub (torchaudio), disabled inflect/lightning/pyworld imports. See memory file for full list.
-9. **DLC inventory (4 FP32 + 4 INT8 ready):**
+9. **DLC inventory (4 FP32 + 4 INT8):**
     | DLC | FP32 | INT8 | DSP Exec |
     |---|---|---|---|
     | campplus | 28MB | 8.7MB | — |
-    | flow estimator | 315MB | 84MB | **0.414s (85x vs CPU)** |
+    | flow estimator | 315MB | 84MB | **0.426s (85x vs CPU)** |
     | f0 predictor | 13MB | 3.3MB | 0.040s |
     | decode pre-ISTFT | 67MB | 17.7MB | — |
-    - Total FP32: 423MB, INT8: 113MB (3.7x smaller)
-    - INT8 unlocks DSP backend (QCS6490 HTP supports INT8, not FP16)
-    - Session caching implemented (Init once, reuse 10x)
-10. **Optimization roadmap (board priority):**
-    - P0: Full DSP INT8 pipeline (flow est 0.414s×10=4.1s, target total <60s)
-    - P1: Session caching ✅ done
-    - P1: INT8 quantization ✅ done (all 4 DLCs)
-    - P2: Resolve DSP multi-DLC OOM (may need separate DSP sessions)
-    - P2: campplus→flow_encoder→speech_tokenizer conversion
-    - P3: Multi-threaded pipeline (LLM || flow decoder)
+    - Total: 423MB→113MB (3.7x). INT8 unlocks DSP (HTP supports INT8, not FP16).
+10. **SC171v3 board deployment (2026-05-16):**
+    - INT8 DSP TTS working: 298s total, 3.6s audio (vs 383s pure CPU)
+    - **Critical OOM fix: LLM must load FIRST, then DSP Init.** Reverse order OOMs.
+    - **fiboaisdk limit: only one unique DSP DLC per process.** Same DLC twice OK.
+    - **DSP Init ~95s is one-time cost.** Service mode would save this.
+    - **Bottleneck shifted:** DSP Exec=0.4s, but Python numpy↔list marshalling costs ~17s/step.
+    - Single DSP session for flow estimator (biggest win); vocoder stays CPU.
+11. **Optimization roadmap (board priority):**
+    - P0: Eliminate numpy↔list marshalling (17s→<1s, would bring total to ~40s)
+    - P1: DSP Init caching / service mode (save 95s per request)
+    - P2: FP16 TorchScript models for LLM (772MB, pushed but not integrated)
+    - P2: campplus DLC integration into board pipeline
+    - P3: speech_tokenizer SNPE conversion, multi-threaded pipeline
 
 ## Project layout
 
