@@ -18,18 +18,23 @@ All project-local work should stay inside `cosyvoice_snpe/`. Do not place new pr
 6. **Docker:** protobuf must be 3.20.x (not 7.x) for SNPE converter. Container `my_work`.
 7. **Key scripts:** `scripts/deploy_to_board/infer_tts_board.py` (board TTS), `scripts/run_infer_snpe.py` (Windows+Docker TTS), `scripts/compare_flow_decoder_snpe_intermediates.py` (SNPE-vs-ORT comparison).
 8. **Board monkey-patches:** wetext (Python 3.8 compat), whisper stub (torchaudio), disabled inflect/lightning/pyworld imports. See memory file for full list.
-9. **DLC inventory (4 DLCs ready for board):**
-    - campplus.dlc (28MB) — speaker embedding, cosine=0.98 vs ORT. NCF input [1,80,T].
-    - flow.decoder.estimator.fp32.dlc (315MB) — flow estimator. NFC inputs [B,500,80].
-    - hift_f0_predictor.dlc (13MB) — F0 prediction. NCF input [1,80,T].
-    - hift_decode_pre_istft.dlc (67MB) — vocoder decode. NCF inputs. Required explicit padding fix for SNPE.
-    - Total DLC coverage: 423MB. Remaining PyTorch: source_gen + ISTFT (<1MB).
+9. **DLC inventory (4 FP32 + 4 INT8 ready):**
+    | DLC | FP32 | INT8 | DSP Exec |
+    |---|---|---|---|
+    | campplus | 28MB | 8.7MB | — |
+    | flow estimator | 315MB | 84MB | **0.414s (85x vs CPU)** |
+    | f0 predictor | 13MB | 3.3MB | 0.040s |
+    | decode pre-ISTFT | 67MB | 17.7MB | — |
+    - Total FP32: 423MB, INT8: 113MB (3.7x smaller)
+    - INT8 unlocks DSP backend (QCS6490 HTP supports INT8, not FP16)
+    - Session caching implemented (Init once, reuse 10x)
 10. **Optimization roadmap (board priority):**
-    - P0: HTP/DSP backend switch (1 line change, 30-50x speedup)
-    - P1: Cache DLC session across ODE steps (eliminate ~1.4s Init/step)
-    - P2: INT8 quantization via `snpe-dlc-quantize`
-    - P2: campplus→flow_encoder→speech_tokenizer conversion (continuing)
-    - P3: Multi-threaded pipeline (frontend/LLM || flow decoder)
+    - P0: Full DSP INT8 pipeline (flow est 0.414s×10=4.1s, target total <60s)
+    - P1: Session caching ✅ done
+    - P1: INT8 quantization ✅ done (all 4 DLCs)
+    - P2: Resolve DSP multi-DLC OOM (may need separate DSP sessions)
+    - P2: campplus→flow_encoder→speech_tokenizer conversion
+    - P3: Multi-threaded pipeline (LLM || flow decoder)
 
 ## Project layout
 
